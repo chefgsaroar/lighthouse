@@ -10,7 +10,6 @@
 const assert = require('assert').strict;
 const CriticalRequestChains = require('../../computed/critical-request-chains.js');
 const NetworkRequest = require('../../lib/network-request.js');
-const NetworkRecords = require('../../computed/network-records.js');
 const ComputedCrc = require('../../computed/critical-request-chains.js');
 const createTestTrace = require('../create-test-trace.js');
 const networkRecordsToDevtoolsLog = require('../network-records-to-devtools-log.js');
@@ -22,20 +21,20 @@ const LOW = 'Low';
 const VERY_LOW = 'VeryLow';
 
 async function createChainsFromMockRecords(prioritiesList, edges, setExtrasFn) {
-  const networkRecords = prioritiesList.map((priority, index) =>
-    ({requestId: index.toString(),
-      url: 'https://www.example.com/' + index,
-      documentURL: 'https://www.example.com',
-      resourceType: index === 0 ? 'Document' : 'Stylesheet',
-      frameId: 1,
-      finished: true,
-      priority,
-      initiator: {type: 'parser'},
-      statusCode: 200,
-      startTime: index,
-      responseReceivedTime: index + 0.5,
-      endTime: index + 1,
-    }));
+  const networkRecords = prioritiesList.map((priority, index) => ({
+    requestId: index.toString(),
+    url: 'https://www.example.com/' + index,
+    documentURL: 'https://www.example.com',
+    resourceType: index === 0 ? 'Document' : 'Stylesheet',
+    frameId: 1,
+    finished: true,
+    priority,
+    initiator: {type: 'parser'},
+    statusCode: 200,
+    startTime: index,
+    responseReceivedTime: index + 0.5,
+    endTime: index + 1,
+  }));
 
   // add mock initiator information
   edges.forEach(edge => {
@@ -71,19 +70,50 @@ function replaceChain(chains, networkRecords) {
 }
 
 describe('CriticalRequestChain gatherer: extractChain function', () => {
-  it('returns correct data for chain from a devtoolsLog', () => {
-    const trace = require('../fixtures/traces/lcp-m78.json');
-    const wikiDevtoolsLog = require('../fixtures/traces/lcp-m78.devtools.log.json');
-    const expectedChains = require('../fixtures/lcp-m78.critical-request-chains.json');
+  it('returns correct data for chain from a devtoolsLog', async () => {
+    function simplifyChain(chains) {
+      Object.keys(chains).forEach(childId => {
+        chains[childId].request = {url: chains[childId].request.url};
+        simplifyChain(chains[childId].children || {});
+      });
+    }
+
+    const trace = createTestTrace({topLevelTasks: [{ts: 0}]});
+    const devtoolsLog = require('../fixtures/wikipedia-redirect.devtoolslog.json');
     const URL = {finalUrl: 'https://en.m.wikipedia.org/wiki/Main_Page'};
 
     const context = {computedCache: new Map()};
-    const networkPromise = NetworkRecords.request(wikiDevtoolsLog, context);
-    const CRCPromise = ComputedCrc.request({trace, devtoolsLog: wikiDevtoolsLog, URL}, context);
-    return Promise.all([CRCPromise, networkPromise]).then(([chains, networkRecords]) => {
-      // set all network requests based on requestid
-      replaceChain(expectedChains, networkRecords);
-      assert.deepEqual(chains, expectedChains);
+    const chains = await ComputedCrc.request({trace, devtoolsLog: devtoolsLog, URL}, context);
+    simplifyChain(chains);
+
+    expect(chains).toEqual({
+      '33097.1': {
+        request: {url: 'http://en.wikipedia.org/'},
+        children: {
+          '33097.1:redirect': {
+            request: {url: 'https://en.wikipedia.org/'},
+            children: {
+              '33097.1:redirect:redirect': {
+                request: {url: 'https://en.wikipedia.org/wiki/Main_Page'},
+                children: {
+                  '33097.1:redirect:redirect:redirect': {
+                    request: {url: 'https://en.m.wikipedia.org/wiki/Main_Page'},
+                    children: {
+                      '33097.3': {
+                        request: {
+                          url:
+                          'https://en.m.wikipedia.org/w/load.php?debug=false&lang=en&modules=mediawiki.ui.button%2Cicon%7Cskins.minerva.base.reset%2Cstyles%7Cskins.minerva.content.styles%7Cskins.minerva.icons.images%7Cskins.minerva.mainPage.styles%7Cskins.minerva.tablet.styles&only=styles&skin=minerva',
+                        },
+                        children: {},
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
   });
 
@@ -131,8 +161,7 @@ describe('CriticalRequestChain gatherer: extractChain function', () => {
         },
       },
     });
-  }
-  );
+  });
 
   it('prunes chains not connected to the root document', async () => {
     const {networkRecords, criticalChains} = await createChainsFromMockRecords(
@@ -360,7 +389,7 @@ describe('CriticalRequestChain gatherer: extractChain function', () => {
   it('returns correct data for chain with preload', async () => {
     const {networkRecords, criticalChains} = await createChainsFromMockRecords(
       [HIGH, HIGH],
-        [[0, 1]],
+      [[0, 1]],
       networkRecords => {
         networkRecords[1].isLinkPreload = true;
       }
@@ -371,6 +400,5 @@ describe('CriticalRequestChain gatherer: extractChain function', () => {
         children: {},
       },
     });
-  }
-  );
+  });
 });

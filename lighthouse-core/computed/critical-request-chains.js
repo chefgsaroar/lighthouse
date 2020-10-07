@@ -7,7 +7,6 @@
 
 const makeComputedArtifact = require('./computed-artifact.js');
 const NetworkRequest = require('../lib/network-request.js');
-const NetworkRecords = require('./network-records.js');
 const MainResource = require('./main-resource.js');
 const PageDependencyGraph = require('./page-dependency-graph.js');
 
@@ -73,7 +72,7 @@ class CriticalRequestChains {
    * @param {LH.Gatherer.Simulation.GraphNode} graph
    * @return {LH.Artifacts.CriticalRequestNode}
    */
-  static extractChainUsingLantern(mainResource, graph) {
+  static extractChainsFromGraph(mainResource, graph) {
     /** @type {LH.Artifacts.CriticalRequestNode} */
     const rootNode = {};
 
@@ -226,36 +225,9 @@ class CriticalRequestChains {
    * @return {Promise<LH.Artifacts.CriticalRequestNode>}
    */
   static async compute_(data, context) {
-    const [networkRecords, mainResource, graph] = await Promise.all([
-      NetworkRecords.request(data.devtoolsLog, context),
-      MainResource.request(data, context),
-      PageDependencyGraph.request(data, context),
-    ]);
-
-
-    // debugging.
-    const a = await CriticalRequestChains.extractChain(networkRecords, mainResource);
-    const b = await CriticalRequestChains.extractChainUsingLantern(mainResource, graph);
-
-    // @ts-ignore
-    function convert(c) {
-      c = {...c};
-
-      for (const [key, value] of Object.entries(c)) {
-        c[key] = {
-          request: {
-            url: value.request.url,
-          },
-          children: convert(value.children),
-        };
-      }
-
-      return c;
-    }
-    // console.log('a =======', JSON.stringify(convert(a), null, 2));
-    // console.log('b =======', JSON.stringify(convert(b), null, 2));
-
-    return b;
+    const mainResource = await MainResource.request(data, context);
+    const graph = await PageDependencyGraph.request(data, context);
+    return CriticalRequestChains.extractChainsFromGraph(mainResource, graph);
   }
 }
 
