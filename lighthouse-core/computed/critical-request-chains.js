@@ -78,24 +78,26 @@ class CriticalRequestChains {
     const rootNode = {};
 
     /**
-     * @param {LH.Gatherer.Simulation.GraphNetworkNode[]} path
+     * @param {LH.Artifacts.NetworkRequest[]} path
      */
     function addChain(path) {
       let currentNode = rootNode;
 
-      for (const node of path) {
-        if (!currentNode[node.id]) {
-          currentNode[node.id] = {
-            request: node.record,
+      for (const record of path) {
+        if (!currentNode[record.requestId]) {
+          currentNode[record.requestId] = {
+            request: record,
             children: {},
           };
         }
 
-        currentNode = currentNode[node.id].children;
+        currentNode = currentNode[record.requestId].children;
       }
     }
 
-    // TODO: is this needed?
+    // By default `traverse` will discover nodes in BFS-order regardless of dependencies, but
+    // here we need traversal in a topological sort order. We'll visit a node only when its
+    // dependencies have been met.
     const seenNodes = new Set();
     /**
      * @param {LH.Gatherer.Simulation.GraphNode} node
@@ -115,11 +117,11 @@ class CriticalRequestChains {
       const networkPath = traversalPath
         .filter(/** @return {n is LH.Gatherer.Simulation.GraphNetworkNode} */
           n => n.type === 'network')
-        .reverse();
+        .reverse()
+        .map(node => node.record);
 
-      // Ignore if some ancestor is not a critical request. Ignores root node.
-      if (networkPath.slice(1).some(n =>
-        !CriticalRequestChains.isCritical(n.record, mainResource))) return;
+      // Ignore if some ancestor is not a critical request.
+      if (networkPath.some(r => !CriticalRequestChains.isCritical(r, mainResource))) return;
 
       addChain(networkPath);
     }, getNextNodes);

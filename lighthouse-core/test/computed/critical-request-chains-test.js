@@ -25,14 +25,16 @@ async function createChainsFromMockRecords(prioritiesList, edges, setExtrasFn) {
   const networkRecords = prioritiesList.map((priority, index) =>
     ({requestId: index.toString(),
       url: 'https://www.example.com/' + index,
+      documentURL: 'https://www.example.com',
       resourceType: index === 0 ? 'Document' : 'Stylesheet',
       frameId: 1,
       finished: true,
       priority,
-      initiator: null,
+      initiator: {type: 'parser'},
       statusCode: 200,
       startTime: index,
       responseReceivedTime: index + 0.5,
+      endTime: index + 1,
     }));
 
   // add mock initiator information
@@ -47,8 +49,8 @@ async function createChainsFromMockRecords(prioritiesList, edges, setExtrasFn) {
   if (setExtrasFn) setExtrasFn(networkRecords);
 
   const trace = createTestTrace({topLevelTasks: [{ts: 0}]});
-  const URL = {finalUrl: networkRecords[0].url};
-  const devtoolsLog = networkRecordsToDevtoolsLog(networkRecords, {skipVerification: true});
+  const URL = {finalUrl: networkRecords[0].documentURL};
+  const devtoolsLog = networkRecordsToDevtoolsLog(networkRecords);
 
   const context = {computedCache: new Map()};
   const criticalChains = await CriticalRequestChains.request({URL, trace, devtoolsLog}, context);
@@ -235,42 +237,30 @@ describe('CriticalRequestChain gatherer: extractChain function', () => {
     });
   });
 
-  // TODO need help
   it('handles redirects', async () => {
     const {networkRecords, criticalChains} = await createChainsFromMockRecords(
-      [HIGH, HIGH, HIGH, HIGH],
-      [[0, 1], [1, 2], [1, 3]],
+      [HIGH, HIGH, HIGH],
+      [[0, 1]],
       networkRecords => {
-        // Make a fake redirect
-        networkRecords[1].requestId = '1:redirect';
-        networkRecords[2].requestId = '1';
+        // Make a fake redirect. Network recorder *appends* `:redirect` on a redirected request.
+        networkRecords[1].requestId = '1';
+        networkRecords[1].resourceType = undefined;
+        networkRecords[1].responseReceivedTime = 2;
 
-        networkRecords[3].requestId = '2';
-        networkRecords[3].url = 'https://example.com/redirect-stylesheet';
-        networkRecords[3].resourceType = undefined;
-        networkRecords[3].statusCode = 302;
-        networkRecords[3].redirectDestination = {
-          redirectDestination: {
-            initiatorRequest: networkRecords[2],
-            resourceType: NetworkRequest.TYPES.Stylesheet,
-            priority: 'High',
-          },
-        };
+        networkRecords[2].requestId = '1:redirect';
+        networkRecords[2].url = 'https://example.com/redirected-stylesheet';
       }
     );
+
     assert.deepEqual(criticalChains, {
       0: {
         request: networkRecords[0],
         children: {
-          '1:redirect': {
+          1: {
             request: networkRecords[1],
             children: {
-              1: {
+              '1:redirect': {
                 request: networkRecords[2],
-                children: {},
-              },
-              2: {
-                request: networkRecords[3],
                 children: {},
               },
             },
@@ -288,21 +278,12 @@ describe('CriticalRequestChain gatherer: extractChain function', () => {
         // 2nd record is a favicon
         networkRecords[1].url = 'https://example.com/favicon.ico';
         networkRecords[1].mimeType = 'image/x-icon';
-        networkRecords[1].parsedURL = {
-          lastPathComponent: 'favicon.ico',
-        };
         // 3rd record is a favicon
         networkRecords[2].url = 'https://example.com/favicon-32x32.png';
         networkRecords[2].mimeType = 'image/png';
-        networkRecords[2].parsedURL = {
-          lastPathComponent: 'favicon-32x32.png',
-        };
         // 4th record is a favicon
         networkRecords[3].url = 'https://example.com/android-chrome-192x192.png';
         networkRecords[3].mimeType = 'image/png';
-        networkRecords[3].parsedURL = {
-          lastPathComponent: 'android-chrome-192x192.png',
-        };
       }
     );
     assert.deepEqual(criticalChains, {
@@ -315,10 +296,10 @@ describe('CriticalRequestChain gatherer: extractChain function', () => {
 
   it('discards iframes as non-critical', async () => {
     const {networkRecords, criticalChains} = await createChainsFromMockRecords(
-      [HIGH, HIGH, HIGH, HIGH],
+      [HIGH, HIGH, HIGH, HIGH, HIGH],
       [[0, 1], [0, 2], [0, 3]],
       networkRecords => {
-        // 1th record is the root document
+        // 1st record is the root document
         networkRecords[0].url = 'https://example.com';
         networkRecords[0].mimeType = 'text/html';
         networkRecords[0].resourceType = NetworkRequest.TYPES.Document;
@@ -332,17 +313,20 @@ describe('CriticalRequestChain gatherer: extractChain function', () => {
         networkRecords[2].mimeType = 'text/html';
         networkRecords[2].resourceType = NetworkRequest.TYPES.Document;
         networkRecords[2].frameId = '3';
-        // 4rd record is an iframe in the page with a redirect https://github.com/GoogleChrome/lighthouse/issues/6675
-        networkRecords[3].url = 'https://example.com/redirect-iframe';
+        // 4th record is an iframe in the page that redirects, see https://github.com/GoogleChrome/lighthouse/issues/6675.
+        networkRecords[3].requestId = '3';
+        networkRecords[3].url = 'https://example.com/redirect-iframe-src';
         networkRecords[3].resourceType = undefined;
-        networkRecords[3].statusCode = 302;
-        networkRecords[3].redirectDestination = {
-          resourceType: NetworkRequest.TYPES.Document,
-          priority: 'Low',
-        };
         networkRecords[3].frameId = '4';
+        networkRecords[3].responseReceivedTime = 4;
+        // 5th record is an iframe in the page that was redirect destination.
+        networkRecords[4].requestId = '3:redirect';
+        networkRecords[4].url = 'https://example.com/redirect-iframe-dest';
+        networkRecords[4].resourceType = NetworkRequest.TYPES.Document;
+        networkRecords[4].frameId = '4';
       }
     );
+
     assert.deepEqual(criticalChains, {
       0: {
         request: networkRecords[0],
