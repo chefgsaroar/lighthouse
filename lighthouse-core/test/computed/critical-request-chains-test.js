@@ -68,7 +68,7 @@ function replaceChain(chains, networkRecords) {
   });
 }
 
-describe('CriticalRequestChain gatherer: extractChain function', () => {
+describe('CriticalRequestChain computed artifact', () => {
   it('returns correct data for chain from a devtoolsLog', async () => {
     function simplifyChain(chains) {
       Object.keys(chains).forEach(childId => {
