@@ -98,14 +98,9 @@ class CriticalRequestChains {
     // here we need traversal in a topological sort order. We'll visit a node only when its
     // dependencies have been met.
     const seenNodes = new Set();
-    /**
-     * @param {LH.Gatherer.Simulation.GraphNode} node
-     */
+    /** @param {LH.Gatherer.Simulation.GraphNode} node */
     function getNextNodes(node) {
-      return node.getDependents().filter(n => {
-        const hasSeenAllDependants = n.getDependencies().every(d => seenNodes.has(d));
-        return hasSeenAllDependants;
-      });
+      return node.getDependents().filter(n => n.getDependencies().every(d => seenNodes.has(d)));
     }
 
     graph.traverse((node, traversalPath) => {
@@ -126,97 +121,6 @@ class CriticalRequestChains {
     }, getNextNodes);
 
     return rootNode;
-  }
-
-  /**
-   * @param {Array<LH.Artifacts.NetworkRequest>} networkRecords
-   * @param {LH.Artifacts.NetworkRequest} mainResource
-   * @return {LH.Artifacts.CriticalRequestNode}
-   */
-  static extractChain(networkRecords, mainResource) {
-    networkRecords = networkRecords.filter(req => req.finished);
-
-    // Build a map of requestID -> Node.
-    /** @type {Map<string, LH.Artifacts.NetworkRequest>} */
-    const requestIdToRequests = new Map();
-    for (const request of networkRecords) {
-      requestIdToRequests.set(request.requestId, request);
-    }
-
-    // Get all the critical requests.
-    /** @type {Array<LH.Artifacts.NetworkRequest>} */
-    const criticalRequests = networkRecords.filter(request =>
-      CriticalRequestChains.isCritical(request, mainResource));
-
-    // Create a tree of critical requests.
-    /** @type {LH.Artifacts.CriticalRequestNode} */
-    const criticalRequestChains = {};
-    for (const request of criticalRequests) {
-      // Work back from this request up to the root. If by some weird quirk we are giving request D
-      // here, which has ancestors C, B and A (where A is the root), we will build array [C, B, A]
-      // during this phase.
-      /** @type {Array<string>} */
-      const ancestors = [];
-      let ancestorRequest = request.initiatorRequest;
-      /** @type {LH.Artifacts.CriticalRequestNode|undefined} */
-      let node = criticalRequestChains;
-      while (ancestorRequest) {
-        const ancestorIsCritical = CriticalRequestChains.isCritical(ancestorRequest, mainResource);
-
-        // If the parent request isn't a high priority request it won't be in the
-        // requestIdToRequests map, and so we can break the chain here. We should also
-        // break it if we've seen this request before because this is some kind of circular
-        // reference, and that's bad.
-        if (!ancestorIsCritical || ancestors.includes(ancestorRequest.requestId)) {
-          // Set the ancestors to an empty array and unset node so that we don't add
-          // the request in to the tree.
-          ancestors.length = 0;
-          node = undefined;
-          break;
-        }
-        ancestors.push(ancestorRequest.requestId);
-        ancestorRequest = ancestorRequest.initiatorRequest;
-      }
-
-      // With the above array we can work from back to front, i.e. A, B, C, and during this process
-      // we can build out the tree for any nodes that have yet to be created.
-      let ancestor = ancestors.pop();
-      while (ancestor && node) {
-        const parentRequest = requestIdToRequests.get(ancestor);
-        if (!parentRequest) {
-          throw new Error(`request with id ${ancestor} not found.`);
-        }
-
-        const parentRequestId = parentRequest.requestId;
-        if (!node[parentRequestId]) {
-          node[parentRequestId] = {
-            request: parentRequest,
-            children: {},
-          };
-        }
-
-        // Step to the next iteration.
-        ancestor = ancestors.pop();
-        node = node[parentRequestId].children;
-      }
-
-      if (!node) {
-        continue;
-      }
-
-      // If the node already exists, bail.
-      if (node[request.requestId]) {
-        continue;
-      }
-
-      // node should now point to the immediate parent for this request.
-      node[request.requestId] = {
-        request,
-        children: {},
-      };
-    }
-
-    return criticalRequestChains;
   }
 
   /**

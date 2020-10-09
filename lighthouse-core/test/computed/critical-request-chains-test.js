@@ -10,7 +10,6 @@
 const assert = require('assert').strict;
 const CriticalRequestChains = require('../../computed/critical-request-chains.js');
 const NetworkRequest = require('../../lib/network-request.js');
-const ComputedCrc = require('../../computed/critical-request-chains.js');
 const createTestTrace = require('../create-test-trace.js');
 const networkRecordsToDevtoolsLog = require('../network-records-to-devtools-log.js');
 
@@ -83,7 +82,7 @@ describe('CriticalRequestChain gatherer: extractChain function', () => {
     const URL = {finalUrl: 'https://en.m.wikipedia.org/wiki/Main_Page'};
 
     const context = {computedCache: new Map()};
-    const chains = await ComputedCrc.request({trace, devtoolsLog: devtoolsLog, URL}, context);
+    const chains = await CriticalRequestChains.request({trace, devtoolsLog, URL}, context);
     simplifyChain(chains);
 
     expect(chains).toEqual({
